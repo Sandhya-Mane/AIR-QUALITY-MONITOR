@@ -7,11 +7,254 @@ Created on Sun Oct 26 14:48:14 2025
 import streamlit as st
 from datetime import datetime
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
-from styles import DASHBOARD_CSS
-import pandas as pd
-import plotly.graph_objects as go
+from sqlalchemy import create_engine, text
+import hashlib
 
+# Database configuration
+DB_HOST = "localhost"
+DB_PORT = "5432"
+DB_NAME = "mini_project_db"
+DB_USER = "postgres"
+DB_PASS = "root"
+
+engine = create_engine(f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
+
+# Locations constant
+LOCATIONS = ["Mumbai Central", "Andheri", "Bandra", "Worli", "Thane"]
+
+# CSS Styling
+DASHBOARD_CSS = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
+.stApp {
+    background: linear-gradient(135deg, #e0e7ff, #f3f4f6);
+}
+
+.main-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 2rem;
+    border-radius: 15px;
+    margin-bottom: 2rem;
+    box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
+}
+
+.main-header h1 {
+    color: white !important;
+    font-size: 2.5rem;
+    margin: 0;
+    font-weight: 700;
+}
+
+.header-subtitle {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 1.1rem;
+    margin-top: 0.5rem;
+}
+
+.user-info {
+    color: rgba(255, 255, 255, 0.95);
+    font-size: 1rem;
+    margin-top: 0.5rem;
+}
+
+div.stButton > button {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+    color: white !important;
+    border-radius: 8px !important;
+    border: none !important;
+    padding: 0.5rem 1rem !important;
+    font-weight: 600 !important;
+    transition: all 0.3s ease !important;
+}
+
+div.stButton > button:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4) !important;
+}
+
+.stMetric {
+    background: white;
+    padding: 1rem;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+</style>
+"""
+
+# Database helper functions
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def load_users():
+    """Load all users from database"""
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT id, name, email, role FROM users"))
+            users = {}
+            for row in result:
+                users[row[2]] = {  # Use email as key
+                    'id': row[0],
+                    'name': row[1],
+                    'email': row[2],
+                    'role': row[3],
+                    'status': 'Active'  # Default status
+                }
+            return users
+    except Exception as e:
+        st.error(f"Error loading users: {e}")
+        return {}
+
+def save_user(email, password, name, role='user'):
+    """Save a new user to database"""
+    hashed_pwd = hash_password(password)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("INSERT INTO users (name, email, password, role) VALUES (:name, :email, :password, :role)"),
+                {"name": name, "email": email, "password": hashed_pwd, "role": role}
+            )
+        return True
+    except Exception as e:
+        st.error(f"Error saving user: {e}")
+        return False
+
+def update_user_role(email, new_role):
+    """Update user role in database"""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE users SET role = :role WHERE email = :email"),
+                {"role": new_role, "email": email}
+            )
+        return True
+    except Exception as e:
+        st.error(f"Error updating user role: {e}")
+        return False
+
+def delete_user(email):
+    """Delete user from database"""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM users WHERE email = :email"),
+                {"email": email}
+            )
+        return True
+    except Exception as e:
+        st.error(f"Error deleting user: {e}")
+        return False
+
+def logout():
+    """Clear session state and logout"""
+    for key in ['logged_in', 'user_name', 'user_email', 'user_role', 'auth_mode']:
+        if key in st.session_state:
+            del st.session_state[key]
+    st.rerun()
+
+def generate_air_quality_data(start_date, end_date, location):
+    """Generate synthetic air quality data"""
+    date_range = pd.date_range(start=start_date, end=end_date, freq='H')
+    np.random.seed(42)
+
+    data = []
+    for dt in date_range:
+        hour = dt.hour
+        month = dt.month
+
+        daily_factor = 1 + 0.3 * np.sin((hour - 6) * np.pi / 12) if 6 <= hour <= 20 else 0.7
+        seasonal_factor = 1.5 if month in [11, 12, 1, 2] else 1.0
+        base_pollution = daily_factor * seasonal_factor
+
+        so2 = max(5, np.random.normal(30 * base_pollution, 15))
+        nox = max(10, np.random.normal(60 * base_pollution, 25))
+        rspm = max(20, np.random.normal(100 * base_pollution, 35))
+        tspm = max(40, np.random.normal(180 * base_pollution, 50))
+
+        max_pollutant = max(so2/80, nox/180, rspm/150, tspm/300)
+        status = "Poor" if max_pollutant > 1.5 else "Moderate" if max_pollutant > 1.0 else "Good"
+
+        data.append({
+            'DateTime': dt,
+            'Date': dt.date(),
+            'SO₂ (μg/m³)': round(so2, 1),
+            'NOₓ (μg/m³)': round(nox, 1),
+            'RSPM (μg/m³)': round(rspm, 1),
+            'TSPM (μg/m³)': round(tspm, 1),
+            'AQI_Status': status,
+            'Location': location
+        })
+
+    return pd.DataFrame(data)
+
+def create_time_series_plot(df):
+    """Create time series plot for air quality data"""
+    fig = go.Figure()
+    colors = ['#667eea', '#764ba2', '#f39c12', '#e74c3c']
+    pollutants = ['SO₂ (μg/m³)', 'NOₓ (μg/m³)', 'RSPM (μg/m³)', 'TSPM (μg/m³)']
+    names = ['SO₂', 'NOₓ', 'RSPM', 'TSPM']
+
+    for i, pollutant in enumerate(pollutants):
+        fig.add_trace(go.Scatter(
+            x=df['DateTime'],
+            y=df[pollutant],
+            name=names[i],
+            line=dict(color=colors[i], width=3, shape='spline'),
+            mode='lines',
+            hovertemplate='<b>' + names[i] + '</b><br>%{x|%d %b %Y %H:%M}<br>%{y:.1f} μg/m³<extra></extra>'
+        ))
+
+    fig.update_layout(
+        title=dict(
+            text="Air Quality Trends Over Time",
+            font=dict(size=22, color='black'),
+            x=0.5,
+            xanchor='center'
+        ),
+        xaxis=dict(
+            title="Date & Time",
+            title_font=dict(size=14, color='black'),
+            tickfont=dict(size=12, color='black'),
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='lightgray'
+        ),
+        yaxis=dict(
+            title="Concentration (μg/m³)",
+            title_font=dict(size=14, color='black'),
+            tickfont=dict(size=12, color='black'),
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='lightgray'
+        ),
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        font=dict(color='black', size=12),
+        height=600,
+        hovermode='x unified',
+        legend=dict(
+            bgcolor='rgba(255,255,255,0.95)',
+            bordercolor='black',
+            borderwidth=1,
+            font=dict(color='black', size=11)
+        ),
+        margin=dict(l=100, r=60, t=100, b=100)
+    )
+    return fig
+
+def readings_page():
+    """Placeholder for readings page"""
+    st.markdown("""
+    <div class="main-header">
+        <h1>SENSOR READINGS</h1>
+        <div class="header-subtitle">Real-time monitoring data</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.info("Sensor readings functionality will be implemented here.")
+    st.write("This section will display real-time sensor data from monitoring stations.")
 
 def admin_dashboard():
     st.markdown(DASHBOARD_CSS, unsafe_allow_html=True)
@@ -181,9 +424,9 @@ def admin_dashboard():
                         if new_email in users_db:
                             st.error("User already exists")
                         else:
-                            save_user(new_email, new_password, new_name, new_role)
-                            st.success("User added successfully!")
-                            st.rerun()
+                            if save_user(new_email, new_password, new_name, new_role):
+                                st.success("User added successfully!")
+                                st.rerun()
 
     elif page == "Readings":
         readings_page()
@@ -207,90 +450,10 @@ def admin_dashboard():
         st.write(f"**Email:** {st.session_state.user_email}")
         st.write(f"**Role:** {st.session_state.user_role}")
 
-def generate_air_quality_data(start_date, end_date, location):
-    date_range = pd.date_range(start=start_date, end=end_date, freq='H')
-    np.random.seed(42)
-
-    data = []
-    for dt in date_range:
-        hour = dt.hour
-        month = dt.month
-
-        daily_factor = 1 + 0.3 * np.sin((hour - 6) * np.pi / 12) if 6 <= hour <= 20 else 0.7
-        seasonal_factor = 1.5 if month in [11, 12, 1, 2] else 1.0
-        base_pollution = daily_factor * seasonal_factor
-
-        so2 = max(5, np.random.normal(30 * base_pollution, 15))
-        nox = max(10, np.random.normal(60 * base_pollution, 25))
-        rspm = max(20, np.random.normal(100 * base_pollution, 35))
-        tspm = max(40, np.random.normal(180 * base_pollution, 50))
-
-        max_pollutant = max(so2/80, nox/180, rspm/150, tspm/300)
-        status = "Poor" if max_pollutant > 1.5 else "Moderate" if max_pollutant > 1.0 else "Good"
-
-        data.append({
-            'DateTime': dt,
-            'Date': dt.date(),
-            'SO₂ (μg/m³)': round(so2, 1),
-            'NOₓ (μg/m³)': round(nox, 1),
-            'RSPM (μg/m³)': round(rspm, 1),
-            'TSPM (μg/m³)': round(tspm, 1),
-            'AQI_Status': status,
-            'Location': location
-        })
-
-    return pd.DataFrame(data)
-
-def create_time_series_plot(df):
-    fig = go.Figure()
-    colors = ['#667eea', '#764ba2', '#f39c12', '#e74c3c']
-    pollutants = ['SO₂ (μg/m³)', 'NOₓ (μg/m³)', 'RSPM (μg/m³)', 'TSPM (μg/m³)']
-    names = ['SO₂', 'NOₓ', 'RSPM', 'TSPM']
-
-    for i, pollutant in enumerate(pollutants):
-        fig.add_trace(go.Scatter(
-            x=df['DateTime'],
-            y=df[pollutant],
-            name=names[i],
-            line=dict(color=colors[i], width=3, shape='spline'),
-            mode='lines',
-            hovertemplate='<b>' + names[i] + '</b><br>%{x|%d %b %Y %H:%M}<br>%{y:.1f} μg/m³<extra></extra>'
-        ))
-
-    fig.update_layout(
-        title=dict(
-            text="Air Quality Trends Over Time",
-            font=dict(size=22, color='black'),
-            x=0.5,
-            xanchor='center'
-        ),
-        xaxis=dict(
-            title="Date & Time",
-            title_font=dict(size=14, color='black'),
-            tickfont=dict(size=12, color='black'),
-            showgrid=True,
-            gridwidth=1,
-            gridcolor='lightgray'
-        ),
-        yaxis=dict(
-            title="Concentration (μg/m³)",
-            title_font=dict(size=14, color='black'),
-            tickfont=dict(size=12, color='black'),
-            showgrid=True,
-            gridwidth=1,
-            gridcolor='lightgray'
-        ),
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-        font=dict(color='black', size=12),
-        height=600,
-        hovermode='x unified',
-        legend=dict(
-            bgcolor='rgba(255,255,255,0.95)',
-            bordercolor='black',
-            borderwidth=1,
-            font=dict(color='black', size=11)
-        ),
-        margin=dict(l=100, r=60, t=100, b=100)
-    )
-    return fig
+if __name__ == "__main__":
+    # Check if user is logged in
+    if 'logged_in' not in st.session_state or not st.session_state.logged_in:
+        st.error("Please login first!")
+        st.stop()
+    
+    admin_dashboard()

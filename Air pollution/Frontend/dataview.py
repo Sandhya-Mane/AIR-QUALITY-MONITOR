@@ -1,3 +1,4 @@
+# dataview.py
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -5,16 +6,8 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from sqlalchemy import create_engine
 
-# Set page config
-st.set_page_config(
-    page_title="Air Quality Monitor | Professional Dashboard",
-    page_icon="🌿",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
 # Modern CSS styling with clean light theme
-st.markdown("""
+DATAVIEW_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
@@ -79,7 +72,7 @@ st.markdown("""
     color: #2c3e50 !important;
 }
 
-/* Sidebar Headers and Text - Force visibility */
+/* Sidebar Headers and Text */
 [data-testid="stSidebar"] h1, 
 [data-testid="stSidebar"] h2, 
 [data-testid="stSidebar"] h3 {
@@ -96,10 +89,27 @@ st.markdown("""
     font-weight: 500 !important;
 }
 
-/* Sidebar input labels */
 [data-testid="stSidebar"] label {
     color: #ffffff !important;
     font-weight: 600 !important;
+}
+
+/* Sidebar Buttons */
+[data-testid="stSidebar"] .stButton > button {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+    color: white !important;
+    border: none !important;
+    padding: 0.75rem 1rem !important;
+    border-radius: 10px !important;
+    font-weight: 600 !important;
+    width: 100% !important;
+    margin: 0.5rem 0 !important;
+    transition: all 0.3s ease !important;
+}
+
+[data-testid="stSidebar"] .stButton > button:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4) !important;
 }
 
 /* Buttons */
@@ -159,40 +169,9 @@ div[data-testid="metric-container"] [data-testid="metric-value"] {
     border: 1px solid #e9ecef;
 }
 
-/* All text visibility fixes - More specific targeting */
-.stApp p, .stApp span, .stApp div, .stApp label {
-    color: #2c3e50 !important;
-}
-
 /* Main content text */
 .main p, .main span, .main div, .main label {
     color: #2c3e50 !important;
-}
-
-/* Sidebar text overrides */
-[data-testid="stSidebar"] p, 
-[data-testid="stSidebar"] span, 
-[data-testid="stSidebar"] div, 
-[data-testid="stSidebar"] label,
-[data-testid="stSidebar"] .stMarkdown {
-    color: #2c3e50 !important;
-}
-
-/* Tab content text */
-[data-baseweb="tab-panel"] p,
-[data-baseweb="tab-panel"] span,
-[data-baseweb="tab-panel"] div {
-    color: #2c3e50 !important;
-}
-
-/* Specific text elements */
-.stMarkdown p, .stMarkdown span, .stMarkdown div {
-    color: #2c3e50 !important;
-}
-
-/* Success/info/warning text */
-.stSuccess p, .stInfo p, .stWarning p, .stError p {
-    color: inherit !important;
 }
 
 /* Section headers */
@@ -260,12 +239,6 @@ div[data-testid="metric-container"] [data-testid="metric-value"] {
     box-shadow: 0 5px 15px rgba(0,0,0,0.08);
 }
 
-/* Plotly Charts */
-.js-plotly-plot .plotly .modebar {
-    background: rgba(248, 249, 250, 0.9);
-    border-radius: 5px;
-}
-
 /* Download Buttons */
 .stDownloadButton > button {
     background: linear-gradient(135deg, #28a745 0%, #20c997 100%) !important;
@@ -299,11 +272,9 @@ div[data-testid="metric-container"] [data-testid="metric-value"] {
     color: #2c3e50;
 }
 </style>
-""", unsafe_allow_html=True)
+"""
 
-# ---------------------------
-# Connect to DB
-# ---------------------------
+# Database connection
 DB_HOST = "localhost"
 DB_PORT = "5432"
 DB_NAME = "mini_project_db"
@@ -312,9 +283,7 @@ DB_PASS = "root"
 
 engine = create_engine(f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
 
-# ---------------------------
 # Load data
-# ---------------------------
 @st.cache_data
 def load_data():
     query = "SELECT * FROM air_quality_data"
@@ -322,54 +291,76 @@ def load_data():
     df['datetime'] = pd.to_datetime(df['measurement_datetime'])
     return df
 
-df = load_data()
-
-# ---------------------------
-# Sidebar Filters
-# ---------------------------
-st.sidebar.header("Filters")
-start_date = st.sidebar.date_input("Start Date", df['datetime'].min())
-end_date = st.sidebar.date_input("End Date", df['datetime'].max())
-location = st.sidebar.selectbox("Select Location", df['location'].unique())
-
-filtered_df = df[(df['datetime'] >= pd.Timestamp(start_date)) &
-                 (df['datetime'] <= pd.Timestamp(end_date)) &
-                 (df['location'] == location)]
-
-# ---------------------------
-# KPIs
-# ---------------------------
-st.markdown('<div class="main-header"><h1>Air Quality Dashboard</h1><p class="header-subtitle">Professional Monitoring View</p></div>', unsafe_allow_html=True)
-
-col1, col2 = st.columns(2)
-col1.metric("SO₂ Average", f"{filtered_df['so2_concentration'].mean():.2f} μg/m³")
-col2.metric("NOx Average", f"{filtered_df['nox_concentration'].mean():.2f} μg/m³")
-#col3.metric("PM2.5 Average", f"{filtered_df['pm25'].mean():.2f} μg/m³")
-
-# ---------------------------
-# Plots
-# ---------------------------
-st.markdown('<div class="section-header">Pollutant Trends</div>', unsafe_allow_html=True)
-
-fig = px.line(filtered_df, x='datetime', y=['so2_concentration','nox_concentration'],
-              labels={'value':'Concentration (μg/m³)','variable':'Pollutant'},
-              template='plotly_white')
-fig.update_layout(height=500, legend_title_text='Pollutants')
-st.plotly_chart(fig, use_container_width=True)
-
-# ---------------------------
-# Data Table
-# ---------------------------
-st.markdown('<div class="section-header">Data Table</div>', unsafe_allow_html=True)
-st.dataframe(filtered_df[1:])
-
-# ---------------------------
-# Download
-# ---------------------------
-csv = filtered_df.to_csv(index=False).encode('utf-8')
-st.download_button(
-    label="Download Filtered Data as CSV",
-    data=csv,
-    file_name='air_quality_filtered.csv',
-    mime='text/csv'
-)
+def dataview_page():
+    st.markdown(DATAVIEW_CSS, unsafe_allow_html=True)
+    
+    # Sidebar Navigation
+    with st.sidebar:
+        st.markdown("### 🌿 Navigation")
+        st.markdown("---")
+        
+        if st.button("📊 Dashboard", use_container_width=True):
+            st.session_state.current_page = 'dashboard'
+            st.experimental_rerun()
+        
+        if st.button("📈 Data View", use_container_width=True, type="primary"):
+            st.session_state.current_page = 'dataview'
+            st.experimental_rerun()
+        
+        st.markdown("---")
+        
+        if st.button("🚪 Logout", use_container_width=True):
+            # Clear session state
+            for key in ['logged_in', 'user_name', 'user_email', 'user_role', 'current_page']:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.experimental_rerun()
+        
+        st.markdown("---")
+        st.markdown(f"**User:** {st.session_state.get('user_name', 'Guest')}")
+        st.markdown(f"**Role:** {st.session_state.get('user_role', 'N/A')}")
+    
+    # Load data
+    df = load_data()
+    
+    # Data Filters Section in Sidebar
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 🔍 Filters")
+    start_date = st.sidebar.date_input("Start Date", df['datetime'].min())
+    end_date = st.sidebar.date_input("End Date", df['datetime'].max())
+    location = st.sidebar.selectbox("Select Location", df['location'].unique())
+    
+    # Filter data
+    filtered_df = df[(df['datetime'] >= pd.Timestamp(start_date)) &
+                     (df['datetime'] <= pd.Timestamp(end_date)) &
+                     (df['location'] == location)]
+    
+    # Main Content
+    st.markdown('<div class="main-header"><h1>Air Quality Dashboard</h1><p class="header-subtitle">Professional Monitoring View</p></div>', unsafe_allow_html=True)
+    
+    # KPIs
+    col1, col2 = st.columns(2)
+    col1.metric("SO₂ Average", f"{filtered_df['so2_concentration'].mean():.2f} μg/m³")
+    col2.metric("NOx Average", f"{filtered_df['nox_concentration'].mean():.2f} μg/m³")
+    
+    # Plots
+    st.markdown('<div class="section-header">Pollutant Trends</div>', unsafe_allow_html=True)
+    
+    fig = px.line(filtered_df, x='datetime', y=['so2_concentration','nox_concentration'],
+                  labels={'value':'Concentration (μg/m³)','variable':'Pollutant'},
+                  template='plotly_white')
+    fig.update_layout(height=500, legend_title_text='Pollutants')
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Data Table
+    st.markdown('<div class="section-header">Data Table</div>', unsafe_allow_html=True)
+    st.dataframe(filtered_df[1:])
+    
+    # Download
+    csv = filtered_df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="Download Filtered Data as CSV",
+        data=csv,
+        file_name='air_quality_filtered.csv',
+        mime='text/csv'
+    )
